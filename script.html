@@ -1,0 +1,976 @@
+<script>
+  const cameraInput = document.getElementById('receipt-camera');
+  const galleryInput = document.getElementById('receipt-gallery');
+  const imagePreview = document.getElementById('image-preview');
+  
+  let base64Image = '';
+  let currentOffset = 0;
+  let analysisCache = {}; 
+  
+  let currentAnalysisReqId = 0;
+  let currentReportReqId = 0;
+  
+  let familyData = [];
+  let initialSettingsStr = '';
+  let masters = { store: {}, category: {} };
+  let isSettingsLoaded = false; // 設定のロード状態を保持
+  
+  let chartInstance = null;
+  let chartInstanceCat = null;
+  let expandedChartInstance = null;
+  
+  let currentAnalysisData = null;
+  let currentChartType = 'category'; 
+
+  // グローバルローディング共通関数
+  function showGlobalLoading(text = '読込中...') {
+    const fBadge = document.getElementById('floating-month-badge');
+    if (fBadge) {
+      fBadge.textContent = text;
+      fBadge.classList.add('loading-glow-active');
+      fBadge.classList.remove('hidden');
+    }
+  }
+
+  function hideGlobalLoading() {
+    const fBadge = document.getElementById('floating-month-badge');
+    if (fBadge) {
+      fBadge.classList.remove('loading-glow-active');
+      fBadge.classList.add('hidden');
+    }
+  }
+
+  // --- タブ切り替えボタン ---
+  const toggleCatBtn = document.getElementById('toggle-cat-btn');
+  const toggleStoreBtn = document.getElementById('toggle-store-btn');
+  if (toggleCatBtn) {
+    toggleCatBtn.addEventListener('click', () => {
+      currentChartType = 'category';
+      toggleCatBtn.className = 'btn-primary';
+      toggleCatBtn.style.border = 'none';
+      if (toggleStoreBtn) {
+        toggleStoreBtn.className = 'btn-secondary';
+        toggleStoreBtn.style.border = '1px solid #444';
+      }
+      if (currentAnalysisData) updateCharts(currentAnalysisData);
+    });
+  }
+  if (toggleStoreBtn) {
+    toggleStoreBtn.addEventListener('click', () => {
+      currentChartType = 'store';
+      toggleStoreBtn.className = 'btn-primary';
+      toggleStoreBtn.style.border = 'none';
+      if (toggleCatBtn) {
+        toggleCatBtn.className = 'btn-secondary';
+        toggleCatBtn.style.border = '1px solid #444';
+      }
+      if (currentAnalysisData) updateCharts(currentAnalysisData);
+    });
+  }
+
+  // --- 画像リサイズ＆圧縮 ---
+  function processImageAndCompress(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_SIZE = 1200; 
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_SIZE) {
+            height *= MAX_SIZE / width;
+            width = MAX_SIZE;
+          }
+        } else {
+          if (height > MAX_SIZE) {
+            width *= MAX_SIZE / height;
+            height = MAX_SIZE;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        base64Image = canvas.toDataURL('image/jpeg', 0.8);
+        if (imagePreview) imagePreview.src = base64Image;
+        const previewModal = document.getElementById('preview-modal');
+        if (previewModal) previewModal.classList.remove('hidden');
+        
+        e.target.value = '';
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  if (cameraInput) cameraInput.addEventListener('change', processImageAndCompress);
+  if (galleryInput) galleryInput.addEventListener('change', processImageAndCompress);
+
+  const btnAnalyzeNow = document.getElementById('btn-analyze-now');
+ if (btnAnalyzeNow) {
+   btnAnalyzeNow.addEventListener('click', () => {
+     if (!base64Image) return;
+     document.getElementById('preview-modal').classList.add('hidden');
+     showGlobalLoading('解析中...');
+     const base64Data = base64Image.split(',')[1];
+     google.script.run
+      .withSuccessHandler((response) => {
+        alert('結果: ' + response.message);
+        analysisCache = {}; 
+        updateSummary(true); 
+      })
+      .withFailureHandler((error) => {
+        hideGlobalLoading();
+        alert('エラー: ' + error.message);
+      })
+      .analyzeReceipt(base64Data);
+    });
+  }
+
+ const btnSaveLater = document.getElementById('btn-save-later');
+ if (btnSaveLater) {
+    btnSaveLater.addEventListener('click', () => {
+      if (!base64Image) return;
+      document.getElementById('preview-modal').classList.add('hidden');
+      showGlobalLoading('保存中...');
+      const base64Data = base64Image.split(',')[1];
+      google.script.run
+      .withSuccessHandler((response) => {
+        alert(response.message);
+        hideGlobalLoading();
+      })
+      .withFailureHandler((error) => {
+        hideGlobalLoading();
+        alert('エラー: ' + error.message);
+      })
+      .saveImageToTemp(base64Data);
+    });
+  }
+
+ const btnRetake = document.getElementById('btn-retake');
+ if (btnRetake) {
+    btnRetake.addEventListener('click', () => {
+      document.getElementById('preview-modal').classList.add('hidden');
+      base64Image = '';
+    });
+  } 
+
+  const batchProcessBtn = document.getElementById('batch-process-btn');
+  if (batchProcessBtn) {
+    batchProcessBtn.addEventListener('click', () => {
+      if (!confirm('ドライブのTempフォルダにある画像をすべて解析しますか？\n（枚数が多いと数分かかる場合があります）')) return;
+      showGlobalLoading('一括解析中...');
+      google.script.run
+      .withSuccessHandler((res) => {
+        alert(res.message);
+        analysisCache = {};
+        updateSummary(true);
+      })
+      .withFailureHandler((err) => {
+        alert('エラー: ' + err.message);
+        hideGlobalLoading();
+      })
+      .analyzeBatchFromDrive();
+    });
+  }
+
+  // --- メインナビゲーション ---
+  const navItems = document.querySelectorAll('.nav-item');
+  const tabContents = document.querySelectorAll('.tab-content');
+  const tabs = ['tab-input', 'tab-analysis', 'tab-settings'];
+  navItems.forEach((nav, index) => {
+    nav.addEventListener('click', (e) => {
+      e.preventDefault();
+      navItems.forEach(n => n.classList.remove('active'));
+      tabContents.forEach(t => t.classList.add('hidden'));
+      nav.classList.add('active');
+      const targetTab = document.getElementById(tabs[index]);
+      if (targetTab) targetTab.classList.remove('hidden');
+      
+      const navEl = document.getElementById('analysis-nav');
+      if (navEl) {
+        if (tabs[index] === 'tab-analysis') navEl.classList.remove('hidden');
+        else navEl.classList.add('hidden');
+      }
+
+      if(tabs[index] === 'tab-settings') {
+        if (!isSettingsLoaded) loadSettings();
+      } else if(tabs[index] === 'tab-analysis') {
+        loadAnalysisData();
+        loadLatestReport();
+      } else if (tabs[index] === 'tab-input') {
+        updateSummary(false); // タブ遷移時は裏側で更新させ「読込中...」を非表示に
+      } else {
+        hideGlobalLoading();
+      }
+    });
+  });
+
+  // --- 分析タブの月移動ボタン ---
+  ['prev-month-btn', 'current-month-btn', 'next-month-btn'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) {
+      btn.addEventListener('click', () => {
+        if (id === 'prev-month-btn') currentOffset--;
+        if (id === 'current-month-btn') currentOffset = 0;
+        if (id === 'next-month-btn') currentOffset++;
+        loadAnalysisData(); 
+        loadLatestReport();
+      });
+    }
+  });
+
+  // --- レポート生成 ---
+  const generateReportBtn = document.getElementById('generate-report-btn');
+  const regenerateReportBtn = document.getElementById('regenerate-report-btn');
+
+  function handleGenerateReport() {
+    if (!confirm('対象月の購入履歴からAIで辛口レポートを生成しますか？\n（数十秒かかる場合があります）')) return;
+    const reqId = ++currentReportReqId;
+    const content = document.getElementById('report-content');
+    if (generateReportBtn) { generateReportBtn.disabled = true; generateReportBtn.textContent = 'AIが分析中...'; }
+    if (content) { content.classList.remove('hidden'); content.textContent = '購入履歴を読み込み、Geminiで分析しています...'; }
+    showGlobalLoading('レポート生成中...');
+    
+    google.script.run
+    .withSuccessHandler((text) => {
+      if (reqId !== currentReportReqId) return; 
+      if (!analysisCache[currentOffset]) analysisCache[currentOffset] = {};
+      analysisCache[currentOffset].report = text;
+      renderReport(text); 
+      if (generateReportBtn) generateReportBtn.disabled = false;
+      hideGlobalLoading();
+    })
+    .withFailureHandler((err) => {
+      if (reqId !== currentReportReqId) return;
+      if (content) content.textContent = 'エラー: ' + err.message;
+      if (generateReportBtn) { generateReportBtn.disabled = false; generateReportBtn.textContent = 'この月の辛口レポートを生成'; }
+      hideGlobalLoading();
+    })
+    .generateMonthlyReport(currentOffset);
+  }
+
+  if (generateReportBtn) generateReportBtn.addEventListener('click', handleGenerateReport);
+  if (regenerateReportBtn) regenerateReportBtn.addEventListener('click', handleGenerateReport);
+
+  function loadLatestReport() {
+    const reqId = ++currentReportReqId;
+    if (analysisCache[currentOffset] && analysisCache[currentOffset].report !== undefined) {
+      renderReport(analysisCache[currentOffset].report);
+      return;
+    }
+    const content = document.getElementById('report-content');
+    const btn = document.getElementById('generate-report-btn');
+    if (content) { content.classList.add('hidden'); content.textContent = ''; }
+    if (btn) btn.textContent = 'この月の辛口レポートを生成';
+    google.script.run.withSuccessHandler((text) => {
+      if (reqId !== currentReportReqId) return;
+      if (!analysisCache[currentOffset]) analysisCache[currentOffset] = {};
+      analysisCache[currentOffset].report = text;
+      renderReport(text);
+    }).getLatestReport(currentOffset);
+  }
+
+  function renderReport(text) {
+    const content = document.getElementById('report-content');
+    const genBtn = document.getElementById('generate-report-btn');
+    const regenBtn = document.getElementById('regenerate-report-btn');
+    if (text) {
+      if (content) { content.textContent = text; content.classList.remove('hidden'); }
+      if (genBtn) genBtn.classList.add('hidden');
+      if (regenBtn) regenBtn.classList.remove('hidden');
+    } else {
+      if (content) { content.classList.add('hidden'); content.textContent = ''; }
+      if (genBtn) { genBtn.classList.remove('hidden'); genBtn.textContent = 'この月の辛口レポートを生成'; }
+      if (regenBtn) regenBtn.classList.add('hidden');
+    }
+  }
+
+  // --- グラフ・カレンダー描画 ---
+  function loadAnalysisData() {
+    const reqId = ++currentAnalysisReqId;
+    if (analysisCache[currentOffset] && analysisCache[currentOffset].analysis) {
+      renderAnalysis(analysisCache[currentOffset].analysis); 
+      hideGlobalLoading();
+      return;
+    }
+    showGlobalLoading('データ取得中...');
+    google.script.run
+    .withSuccessHandler(data => {
+      if (reqId !== currentAnalysisReqId) return; 
+      if (!analysisCache[currentOffset]) analysisCache[currentOffset] = {};
+      analysisCache[currentOffset].analysis = data;
+      if (data.masters) masters = data.masters;
+      renderAnalysis(data);
+      hideGlobalLoading();
+    })
+    .withFailureHandler(e => { 
+      if (reqId !== currentAnalysisReqId) return;
+      alert('エラー: ' + e.message); 
+      hideGlobalLoading(); 
+    })
+    .getAnalysisData(currentOffset);
+  }
+
+  function renderAnalysis(data) {
+    if (data.error) return;
+    currentAnalysisData = data;
+    
+    const navMonthLabel = document.getElementById('nav-month-label');
+    if (navMonthLabel) navMonthLabel.textContent = data.targetMonthLabel;
+
+    updateCharts(data);
+
+    const calGrid = document.getElementById('calendar-grid');
+    if (!calGrid) return;
+    calGrid.innerHTML = '';
+    const weekDays = ['日', '月', '火', '水', '木', '金', '土'];
+    weekDays.forEach((wd, idx) => {
+      let color = 'var(--text-secondary)'; if (idx === 0) color = '#e57373'; if (idx === 6) color = '#64b5f6';
+      calGrid.innerHTML += `<div style="text-align:center; font-size:12px; color:${color}; padding-bottom:4px;">${wd}</div>`;
+    });
+    
+    const firstDay = new Date(data.targetYear, data.targetMonth, 1).getDay();
+    const daysInMonth = new Date(data.targetYear, data.targetMonth + 1, 0).getDate();
+    
+    for (let i = 0; i < firstDay; i++) { calGrid.innerHTML += `<div class="cal-cell" style="background:transparent;"></div>`; }
+    for (let i = 1; i <= daysInMonth; i++) {
+      const d = new Date(data.targetYear, data.targetMonth, i);
+      const dayStr = `${data.targetYear}/${(data.targetMonth+1).toString().padStart(2,'0')}/${i.toString().padStart(2,'0')}`;
+      let dayClass = '';
+      if (data.holidayDates && data.holidayDates[dayStr]) { dayClass = 'holiday'; }
+      else if (d.getDay() === 0) dayClass = 'sunday';
+      else if (d.getDay() === 6) dayClass = 'saturday';
+      const cell = document.createElement('div');
+      cell.className = 'cal-cell';
+      cell.innerHTML = `<span class="cal-date ${dayClass}">${i}</span>`;
+      
+      if (data.calendarData && data.calendarData[dayStr]) {
+        data.calendarData[dayStr].forEach(r => {
+          const typeConf = masters.store[r.type] || masters.store['その他'] || { svg: '', hex: '#a0a0a0' };
+          cell.innerHTML += `<div class="cal-icon" style="color:${typeConf.hex}"><span style="display:inline-block; width:14px; height:14px;">${typeConf.svg}</span><span>¥${r.amount}</span></div>`;
+        });
+        
+        let tooltipHtml = '';
+        data.calendarData[dayStr].forEach(r => {
+          const typeConf = masters.store[r.type] || masters.store['その他'] || { svg: '', hex: '#a0a0a0' };
+          const icon = typeConf.svg;
+          const color = typeConf.hex;
+          
+          const itemsCount = {};
+          if (r.items) {
+            r.items.forEach(item => {
+              if (!itemsCount[item.name]) itemsCount[item.name] = { category: item.category, count: 0, price: item.price };
+              itemsCount[item.name].count++;
+            });
+          }
+          
+          // 消費税という文字列を含む品目を末尾に寄せるソート
+          const sortedKeys = Object.keys(itemsCount).sort((a, b) => {
+            const aTax = (a.includes('消費税') || a.includes('税金')) ? 1 : 0;
+            const bTax = (b.includes('消費税') || b.includes('税金')) ? 1 : 0;
+            return aTax - bTax;
+          });
+
+          let itemsHtml = sortedKeys.map(k => {
+              const d = itemsCount[k];
+              const isWaste = d.category === '要検証';
+              
+              let displayName = k;
+              let prefix = '・';
+              if (displayName.includes('[10%]')) {
+                prefix = '⑩';
+                displayName = displayName.replace('[10%]', '').trim();
+              } else if (displayName.includes('[8%]')) {
+                prefix = '⑧';
+                displayName = displayName.replace('[8%]', '').trim();
+              }
+              
+              if (displayName.includes('消費税')) {
+                if (prefix === '⑩') displayName = '消費税 (10%)';
+                else if (prefix === '⑧') displayName = '消費税 (8%)';
+                else displayName = '消費税';
+              }
+              
+              let style = `font-size:12px; margin-left:8px; display:flex; justify-content:space-between;`;
+              if (isWaste) style += ` color: #cf6679; font-weight:bold;`;
+              else style += ` color: #e0e0e0;`;
+              
+              let namePart = `${prefix}${displayName}${isWaste ? ' (⚠要検証)' : ''} ${d.count > 1 ? '×'+d.count : ''}`;
+              let pricePart = `¥${(d.price * d.count).toLocaleString()}`;
+              
+              return `<div style="${style}"><span>${namePart}</span><span>${pricePart}</span></div>`;
+          }).join('');
+        
+          tooltipHtml += `
+          <div style="border: 1px solid ${color}; border-radius: 6px; padding: 6px; margin-bottom: 6px; background: rgba(0,0,0,0.8); box-shadow: 0 4px 8px rgba(0,0,0,0.5);">
+            <strong style="color:${color}; display:flex; align-items:center; justify-content:space-between; gap:6px; font-size:14px; margin-bottom:4px; border-bottom:1px solid #444; padding-bottom:4px;">
+              <span style="display:flex; align-items:center; gap:4px;">
+                <span style="display:inline-block; width:1.2em; height:1.2em; fill:currentColor;">${icon}</span>
+                ${r.storeName}
+              </span>
+              <span>¥${r.amount.toLocaleString()}</span>
+            </strong>
+            ${itemsHtml}
+          </div>`;
+        });
+        cell.addEventListener('mouseenter', () => {
+          const tooltip = document.getElementById('cal-tooltip');
+          if(tooltip) { tooltip.innerHTML = tooltipHtml; tooltip.classList.remove('hidden'); }
+        });
+        cell.addEventListener('mousemove', (e) => {
+          const tooltip = document.getElementById('cal-tooltip');
+          if(!tooltip) return;
+          const tooltipWidth = tooltip.offsetWidth || 180;
+          const tooltipHeight = tooltip.offsetHeight || 100;
+          let left = e.pageX + 15;
+          if (left + tooltipWidth > window.innerWidth - 10) left = window.innerWidth - tooltipWidth - 10;
+          if (left < 10) left = 10;
+          
+          let top = e.pageY + 15;
+          // 画面下端にはみ出る場合はカーソルの上に反転表示
+          if (e.clientY + 15 + tooltipHeight > window.innerHeight) {
+            top = e.pageY - tooltipHeight - 15;
+          }
+          
+          tooltip.style.left = left + 'px';
+          tooltip.style.top = top + 'px';
+        });
+        cell.addEventListener('mouseleave', () => {
+          const tooltip = document.getElementById('cal-tooltip');
+          if(tooltip) tooltip.classList.add('hidden');
+        });
+      }
+      calGrid.appendChild(cell);
+    }
+  }
+
+  function updateCharts(data) {
+    let dLabels = []; let dDataValues = []; let dBgColors = [];
+    let bLabels = data.monthlyStats ? data.monthlyStats.map(s => s.label) : []; 
+    let bDatasets = [];
+
+    if (currentChartType === 'category') {
+      dLabels = Object.keys(data.categoryTotal || {});
+      dDataValues = Object.values(data.categoryTotal || {});
+      dBgColors = dLabels.map(k => k === '要検証' ? '#e91e63' : (masters.category[k] ? masters.category[k].hex : '#9e9e9e'));
+      
+      const allCats = new Set();
+      if (data.months && data.monthlyDataCat) {
+        data.months.forEach(m => {
+          if (data.monthlyDataCat[m]) {
+            Object.keys(data.monthlyDataCat[m]).forEach(c => {
+              if (data.monthlyDataCat[m][c] > 0) allCats.add(c);
+            });
+          }
+        });
+      }
+      const uniqueCats = Array.from(allCats);
+      bDatasets = uniqueCats.map(type => {
+        const color = type === '要検証' ? '#e91e63' : (masters.category[type] ? masters.category[type].hex : '#9e9e9e');
+        return { label: type, data: (data.months || []).map(m => (data.monthlyDataCat && data.monthlyDataCat[m] && data.monthlyDataCat[m][type]) ? data.monthlyDataCat[m][type] : 0), backgroundColor: color };
+      });
+    } else {
+      dLabels = Object.keys(data.storeTotal || {});
+      dDataValues = Object.values(data.storeTotal || {});
+      dBgColors = dLabels.map(k => masters.store[k] ? masters.store[k].hex : '#a0a0a0');
+      
+      const storeTypesList = Object.keys(masters.store || {});
+      const activeStoreTypes = storeTypesList.filter(type => {
+        return (data.months || []).some(m => data.monthlyDataStore && data.monthlyDataStore[m] && data.monthlyDataStore[m][type] > 0);
+      });
+      bDatasets = activeStoreTypes.map(type => {
+        const color = masters.store[type] ? masters.store[type].hex : '#a0a0a0';
+        return { label: type, data: (data.months || []).map(m => (data.monthlyDataStore && data.monthlyDataStore[m] && data.monthlyDataStore[m][type]) ? data.monthlyDataStore[m][type] : 0), backgroundColor: color };
+      });
+    }
+
+    const doughnutCenterTextPlugin = {
+      id: 'doughnutCenterText',
+      beforeDraw: (chart) => {
+        if (chart.config.type !== 'doughnut') return;
+        const { ctx, chartArea: { top, bottom, left, right } } = chart;
+        ctx.save();
+        let total = 0;
+        if (chart.data.datasets.length > 0) {
+          chart.data.labels.forEach((label, index) => {
+            if (chart.getDataVisibility(index)) {
+              total += chart.data.datasets[0].data[index];
+            }
+          });
+        }
+        const centerX = (left + right) / 2;
+        const centerY = (top + bottom) / 2;
+        ctx.font = '12px sans-serif'; ctx.fillStyle = '#a0a0a0'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('合計', centerX, centerY - 10);
+        ctx.font = 'bold 16px sans-serif'; ctx.fillStyle = '#ffffff';
+        ctx.fillText('¥' + total.toLocaleString(), centerX, centerY + 10);
+        ctx.restore();
+      }
+    };
+
+    // 拡大グラフ用のカスタムHTMLツールチップ
+    const customExternalTooltip = (context) => {
+      const {chart, tooltip} = context;
+      let tooltipEl = document.getElementById('chartjs-custom-tooltip');
+      if (!tooltipEl) {
+        tooltipEl = document.createElement('div');
+        tooltipEl.id = 'chartjs-custom-tooltip';
+        tooltipEl.style.borderRadius = '8px';
+        tooltipEl.style.color = '#e0e0e0';
+        tooltipEl.style.pointerEvents = 'none';
+        tooltipEl.style.position = 'absolute';
+        tooltipEl.style.zIndex = 4000;
+        tooltipEl.style.boxShadow = '0 8px 16px rgba(0,0,0,0.7)';
+        tooltipEl.style.padding = '10px';
+        tooltipEl.style.fontSize = '12px';
+        tooltipEl.style.minWidth = '180px';
+        document.body.appendChild(tooltipEl);
+      }
+      if (tooltip.opacity === 0) {
+        tooltipEl.style.opacity = 0;
+        return;
+      }
+
+      // ツールチップの色を項目の色に合わせる
+      let borderColor = 'var(--primary-color)';
+      if (tooltip.labelColors && tooltip.labelColors.length > 0) {
+        borderColor = tooltip.labelColors[0].backgroundColor;
+      }
+      tooltipEl.style.background = 'rgba(0,0,0,0.8)';
+      tooltipEl.style.border = `1px solid ${borderColor}`;
+
+      const dataPoints = tooltip.dataPoints;
+      if (!dataPoints || dataPoints.length === 0) return;
+      const item = dataPoints[0];
+      let html = '';
+      let titleStr = '';
+      let itemsObj = null;
+      const rawVal = item.raw;
+
+      if (chart.config.type === 'bar') {
+        const index = item.dataIndex;
+        const type = item.dataset.label;
+        const stat = data.monthlyStats ? data.monthlyStats[index] : null;
+        if (stat) {
+          const ym = stat.rawLabel;
+          titleStr = `${ym} ${type}`;
+          itemsObj = currentChartType === 'category' ? 
+            (data.monthlyItemsCat && data.monthlyItemsCat[ym] ? data.monthlyItemsCat[ym][type] : null) :
+            (data.monthlyItemsStore && data.monthlyItemsStore[ym] ? data.monthlyItemsStore[ym][type] : null);
+        }
+      } else if (chart.config.type === 'doughnut') {
+        const key = chart.data.labels[item.dataIndex];
+        titleStr = key;
+        itemsObj = currentChartType === 'category' ? 
+          (data.categoryItems ? data.categoryItems[key] : null) : 
+          (data.storeItemsDoughnut ? data.storeItemsDoughnut[key] : null);
+      }
+
+      html += `<strong style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:14px; color:${borderColor}; border-bottom:1px solid #444; padding-bottom:4px;"><span>${titleStr}</span><span>¥${rawVal.toLocaleString()}</span></strong>`;
+
+      if (itemsObj) {
+        const sortedKeys = Object.keys(itemsObj).sort((a, b) => {
+          const aTax = a.includes('消費税') ? 1 : 0;
+          const bTax = b.includes('消費税') ? 1 : 0;
+          return aTax - bTax;
+        });
+        sortedKeys.forEach(k => {
+          const d = itemsObj[k];
+          let displayName = k;
+          let prefix = '・';
+          
+          if (displayName.includes('[10%]')) {
+            prefix = '⑩';
+            displayName = displayName.replace('[10%]', '').trim();
+          } else if (displayName.includes('[8%]')) {
+            prefix = '⑧';
+            displayName = displayName.replace('[8%]', '').trim();
+          }
+          
+          if (displayName.includes('消費税')) {
+            if (prefix === '⑩') displayName = '消費税 (10%)';
+            else if (prefix === '⑧') displayName = '消費税 (8%)';
+            else displayName = '消費税';
+          }
+          const namePart = `${prefix}${displayName} ${d.count > 1 ? '×'+d.count : ''}`;
+          const pricePart = `¥${(d.price * d.count).toLocaleString()}`;
+          html += `<div style="display:flex; justify-content:space-between; margin-bottom:4px; padding-left:4px;"><span>${namePart}</span><span>${pricePart}</span></div>`;
+        });
+      }
+      tooltipEl.innerHTML = html;
+
+      const position = chart.canvas.getBoundingClientRect();
+      let top = position.top + window.pageYOffset + tooltip.caretY + 15;
+      let left = position.left + window.pageXOffset + tooltip.caretX;
+
+      tooltipEl.style.opacity = 1;
+      tooltipEl.style.left = left + 'px';
+      tooltipEl.style.top = top + 'px';
+      
+      const rect = tooltipEl.getBoundingClientRect();
+      if (left + rect.width / 2 > window.innerWidth) left = window.innerWidth - rect.width / 2 - 10;
+      if (left - rect.width / 2 < 10) left = rect.width / 2 + 10;
+      tooltipEl.style.transform = `translate(-50%, 0)`;
+      
+      if (top + rect.height > window.innerHeight) {
+        tooltipEl.style.top = (position.top + window.pageYOffset + tooltip.caretY - rect.height - 15) + 'px';
+      } else {
+        tooltipEl.style.top = top + 'px';
+      }
+    };
+
+    const ctxCatEl = document.getElementById('category-chart');
+    if (ctxCatEl) {
+      const ctxCat = ctxCatEl.getContext('2d');
+      if (chartInstanceCat) chartInstanceCat.destroy();
+      chartInstanceCat = new Chart(ctxCat, {
+        type: 'doughnut',
+        data: { labels: dLabels, datasets: [{ data: dDataValues, backgroundColor: dBgColors, borderWidth: 0 }] },
+        options: {
+          plugins: {
+            legend: { labels: { color: '#e0e0e0' } },
+            tooltip: {
+              enabled: false,
+              external: customExternalTooltip
+            }
+          },
+          color: '#e0e0e0', maintainAspectRatio: false
+        },
+        plugins: [doughnutCenterTextPlugin]
+      });
+
+      ctxCatEl.ondblclick = () => {
+        document.getElementById('chart-modal').classList.remove('hidden');
+        const expCtx = document.getElementById('expanded-chart').getContext('2d');
+        if (expandedChartInstance) expandedChartInstance.destroy();
+        const origOptions = chartInstanceCat.options;
+        const expOptions = JSON.parse(JSON.stringify(origOptions));
+      
+        expOptions.plugins.tooltip.enabled = false;
+        expOptions.plugins.tooltip.external = customExternalTooltip;
+        expOptions.plugins.legend.labels.font = { size: 14 };
+        expandedChartInstance = new Chart(expCtx, {
+          type: 'doughnut', data: chartInstanceCat.data, options: expOptions, plugins: [doughnutCenterTextPlugin]
+        });
+      };
+    }
+
+    const topLabelsPlugin = {
+      id: 'topLabels',
+      afterDatasetsDraw: (chart) => {
+        const ctx = chart.ctx;
+        chart.data.labels.forEach((label, index) => {
+          let total = 0; let lastY = chart.chartArea.bottom; let x = 0; let hasData = false;
+          chart.data.datasets.forEach((dataset, i) => {
+            const meta = chart.getDatasetMeta(i);
+            if (!meta.hidden) {
+              total += dataset.data[index];
+              const point = meta.data[index];
+              if (point) {
+                x = point.x;
+                if (point.y < lastY) lastY = point.y;
+                hasData = true;
+              }
+            }
+          });
+          if (hasData) {
+            if (total > 0) {
+              ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillStyle = '#e0e0e0';
+              ctx.fillText('¥' + total.toLocaleString(), x, lastY - 5);
+            }
+            const stat = data.monthlyStats ? data.monthlyStats[index] : null;
+            if (stat && stat.diffText) {
+              ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillStyle = stat.diffColor;
+              ctx.fillText(stat.diffText, x, chart.chartArea.bottom + 30);
+            }
+          }
+        });
+      }
+    };
+
+    const ctxBarEl = document.getElementById('monthly-bar-chart');
+    if (ctxBarEl) {
+      const ctxBar = ctxBarEl.getContext('2d');
+      const barChartOptions = {
+        responsive: true, maintainAspectRatio: false,
+        layout: { padding: { top: 40, bottom: 35 } },
+        scales: {
+          x: { stacked: true, ticks: { callback: function(v, i) { return data.monthlyStats ? data.monthlyStats[i].label : ''; }, color: '#e0e0e0', font: { size: 12, weight: 'bold' } } },
+          y: { stacked: true, grace: '15%' } 
+        },
+        plugins: {
+          legend: { labels: { color: '#e0e0e0' } },
+          tooltip: {
+          bodySpacing: 6,
+          callbacks: {
+            title: () => null,
+            label: function(context) { return context.dataset.label + ': ¥' + context.raw.toLocaleString(); },
+            afterBody: function(context) {
+              return []; // 通常表示では詳細は非表示
+            }
+          }
+        }
+      }, color: '#e0e0e0'
+    };
+
+    if (chartInstance) chartInstance.destroy();
+    chartInstance = new Chart(ctxBar, {
+      type: 'bar', data: { labels: bLabels, datasets: bDatasets }, options: barChartOptions, plugins: [topLabelsPlugin]
+    });
+
+      const tooltip = document.getElementById('cal-tooltip');
+      const showBarTooltip = (e, canvasElement, chartObj) => {
+        if (!chartObj) return;
+        const rect = canvasElement.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const xScale = chartObj.scales.x;
+        
+        if (y >= xScale.top && y <= xScale.bottom && x >= xScale.left && x <= xScale.right) {
+          const index = xScale.getValueForPixel(x);
+          if (index >= 0 && data.monthlyStats && index < data.monthlyStats.length) {
+            const tickX = xScale.getPixelForTick(index);
+            if (Math.abs(x - tickX) < 25) {
+              const stat = data.monthlyStats[index];
+              if (tooltip) {
+                tooltip.innerHTML = `
+                  <div style="border: 1px solid var(--primary-color); border-radius: 6px; padding: 8px; background: rgba(0,0,0,0.8); box-shadow: 0 4px 8px rgba(0,0,0,0.5); font-size: 12px; color: #e0e0e0;">
+                    <strong style="color:var(--primary-color); display:block; margin-bottom:4px; font-size:13px;">${stat.label}の家計簿</strong>
+                    <div>収入: 未設定</div>
+                    <div>支出合計: ¥${stat.total.toLocaleString()}</div>
+                    <div>収支: 未設定</div>
+                  </div>`;
+                const tooltipWidth = tooltip.offsetWidth || 150;
+                const tooltipHeight = tooltip.offsetHeight || 100;
+                let left = e.pageX + 15;
+                if (left + tooltipWidth > window.innerWidth - 10) left = window.innerWidth - tooltipWidth - 10;
+                if (left < 10) left = 10;
+                
+                let top = e.pageY - tooltipHeight - 15; // 棒グラフは基本上に表示
+                // 画面上端にはみ出る場合はカーソルの下に反転表示
+                if (e.clientY - tooltipHeight - 15 < 0) {
+                  top = e.pageY + 15;
+                }
+                
+                tooltip.style.left = left + 'px';
+                tooltip.style.top = top + 'px';
+                tooltip.classList.remove('hidden');
+              }
+              return;
+            }
+          }
+        }
+        if (!e.target.closest('#calendar-grid') && !e.target.closest('#expanded-chart') && !e.target.closest('#monthly-bar-chart')) {
+          if (tooltip) tooltip.classList.add('hidden');
+        }
+      };
+
+      ctxBarEl.onmousemove = (e) => showBarTooltip(e, ctxBarEl, chartInstance);
+      ctxBarEl.onmouseleave = () => { if (tooltip) tooltip.classList.add('hidden'); };
+      
+      ctxBarEl.ondblclick = () => {
+        document.getElementById('chart-modal').classList.remove('hidden');
+        const expCtx = document.getElementById('expanded-chart').getContext('2d');
+        if (expandedChartInstance) expandedChartInstance.destroy();
+        
+        const expOptions = JSON.parse(JSON.stringify(barChartOptions));
+        expOptions.scales.x.ticks.font = { size: 14, weight: 'bold' };
+        expOptions.scales.y.ticks = { color: '#e0e0e0', font: { size: 14 } };
+        expOptions.plugins.legend.labels.font = { size: 14 };
+        expOptions.scales.x.ticks.callback = barChartOptions.scales.x.ticks.callback;
+        
+        expOptions.plugins.tooltip.enabled = false;
+        expOptions.plugins.tooltip.external = customExternalTooltip;
+
+        expandedChartInstance = new Chart(expCtx, {
+          type: 'bar', data: chartInstance.data, options: expOptions, plugins: [topLabelsPlugin]
+        });
+      };
+    }
+  }
+
+  // --- 設定関連 ---
+  function checkSettingsChanged() {
+    const cookEl = document.getElementById('setting-cooking');
+    const currentStr = JSON.stringify({ fam: familyData, cook: cookEl ? cookEl.value : '' });
+    const bar = document.getElementById('floating-action-bar');
+    if (bar) {
+      if (currentStr !== initialSettingsStr) bar.classList.add('visible');
+      else bar.classList.remove('visible');
+    }
+  }
+
+  const settingCookingEl = document.getElementById('setting-cooking');
+  if (settingCookingEl) settingCookingEl.addEventListener('change', checkSettingsChanged);
+
+  function renderFamilySettings() {
+    const container = document.getElementById('family-settings-container');
+    if (!container) return;
+    container.innerHTML = '';
+    familyData.forEach((f, idx) => {
+      const row = document.createElement('div'); row.className = 'family-row';
+      
+      const roleSel = document.createElement('select'); roleSel.className = 'family-input';
+      ['大人', '子供'].forEach(o => { const opt = document.createElement('option'); opt.value = o; opt.textContent = o; if(f.role===o) opt.selected=true; roleSel.appendChild(opt); });
+      roleSel.onchange = (e) => { familyData[idx].role = e.target.value; checkSettingsChanged(); };
+      
+      const genSel = document.createElement('select'); genSel.className = 'family-input';
+      ['男性', '女性', 'その他'].forEach(o => { const opt = document.createElement('option'); opt.value = o; opt.textContent = o; if(f.gender===o) opt.selected=true; genSel.appendChild(opt); });
+      genSel.onchange = (e) => { familyData[idx].gender = e.target.value; checkSettingsChanged(); };
+      
+      const birthIn = document.createElement('input'); birthIn.className = 'family-input'; birthIn.type = 'date'; birthIn.value = f.birth;
+      birthIn.onchange = (e) => { familyData[idx].birth = e.target.value; checkSettingsChanged(); };
+      
+      const noteIn = document.createElement('input'); noteIn.className = 'family-input'; noteIn.type = 'text'; noteIn.value = f.note; noteIn.placeholder = '事情 (例: 筋トレ中)';
+      noteIn.oninput = (e) => { familyData[idx].note = e.target.value; checkSettingsChanged(); };
+
+      const delBtn = document.createElement('button'); delBtn.className = 'cat-row-remove'; delBtn.innerHTML = '&times;'; delBtn.style.position = 'absolute'; delBtn.style.top = '4px'; delBtn.style.right = '4px';
+      delBtn.onclick = () => { familyData.splice(idx, 1); renderFamilySettings(); checkSettingsChanged(); };
+      
+      row.appendChild(roleSel); row.appendChild(genSel); row.appendChild(birthIn); row.appendChild(noteIn); row.appendChild(delBtn);
+      container.appendChild(row);
+    });
+  }
+  
+  const addFamilyBtn = document.getElementById('add-family-btn');
+  if (addFamilyBtn) {
+    addFamilyBtn.onclick = () => { familyData.push({ role: '大人', gender: '男性', birth: '', note: '' }); renderFamilySettings(); checkSettingsChanged(); };
+  }
+
+  function loadSettings() {
+    isSettingsLoaded = true; // 呼び出し開始直後にフラグを立てて重複実行を防止
+    showGlobalLoading('設定を取得中...');
+    google.script.run.withSuccessHandler(data => {
+      const cookEl = document.getElementById('setting-cooking');
+      if(data.settings.CookingPreference && cookEl) cookEl.value = data.settings.CookingPreference;
+      if(data.settings.FamilySettings) familyData = JSON.parse(data.settings.FamilySettings);
+      if (data.masters) masters = data.masters;
+      
+      initialSettingsStr = JSON.stringify({ fam: familyData, cook: cookEl ? cookEl.value : '' });
+      renderFamilySettings(); 
+      checkSettingsChanged();
+      hideGlobalLoading();
+    }).withFailureHandler(err => {
+      alert('エラー: ' + err.message);
+      hideGlobalLoading();
+    }).getAllSettings();
+  }
+
+  const cancelSettingsBtn = document.getElementById('cancel-settings-btn');
+  if (cancelSettingsBtn) {
+    cancelSettingsBtn.addEventListener('click', () => {
+      const initObj = JSON.parse(initialSettingsStr);
+      familyData = initObj.fam; 
+      const cookEl = document.getElementById('setting-cooking');
+      if (cookEl) cookEl.value = initObj.cook;
+      renderFamilySettings(); checkSettingsChanged();
+    });
+  }
+
+  const saveSettingsBtn = document.getElementById('save-settings-btn');
+  if (saveSettingsBtn) {
+    saveSettingsBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      showGlobalLoading('保存中...');
+      const cookEl = document.getElementById('setting-cooking');
+      google.script.run.withSuccessHandler(() => {
+        initialSettingsStr = JSON.stringify({ fam: familyData, cook: cookEl ? cookEl.value : '' });
+        checkSettingsChanged();
+        analysisCache = {}; // 設定変更を分析データに反映させるためキャッシュをクリア
+        updateSummary(false); // サマリーを裏側で再読込
+        hideGlobalLoading();
+      }).withFailureHandler(err => {
+        alert('保存エラー: ' + err.message);
+        hideGlobalLoading();
+      }).saveAllSettings({ fam: familyData, cook: cookEl ? cookEl.value : '' });
+    });
+  }
+
+  const generateSampleBtn = document.getElementById('generate-sample-btn');
+  if (generateSampleBtn) {
+    generateSampleBtn.addEventListener('click', () => {
+      if (!confirm('5日分のサンプルデータを追加しますか？')) return;
+      showGlobalLoading('データ生成中...');
+      google.script.run.withSuccessHandler((msg) => { alert(msg); analysisCache = {}; updateSummary(true); })
+        .withFailureHandler((err) => { alert('エラー: ' + err.message); hideGlobalLoading(); }).generateSampleData();
+    });
+  }
+  
+  const clearDataBtn = document.getElementById('clear-data-btn');
+  if (clearDataBtn) {
+    clearDataBtn.addEventListener('click', () => {
+      if (!confirm('本当にレシートと品目の全データを削除しますか？\n（設定は保持されます）')) return;
+      showGlobalLoading('データ削除中...');
+      google.script.run.withSuccessHandler((msg) => { alert(msg); analysisCache = {}; updateSummary(true); })
+        .withFailureHandler((err) => { alert('エラー: ' + err.message); hideGlobalLoading(); }).clearAllData();
+    });
+  }
+
+  // --- モーダル制御 ---
+  ['modal-close', 'receipt-modal', 'chart-modal-close', 'chart-modal'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('click', (e) => {
+        if (id.includes('close') || e.target.id === id) {
+          const modalId = id.includes('chart') ? 'chart-modal' : 'receipt-modal';
+          document.getElementById(modalId).classList.add('hidden');
+          
+          const customTooltip = document.getElementById('chartjs-custom-tooltip');
+          if (customTooltip) customTooltip.style.opacity = 0;
+        }
+      });
+    }
+  });
+
+  function updateSummary(showLoading = true) {
+    if (showLoading) showGlobalLoading('読込中...');
+    google.script.run.withSuccessHandler((data) => {
+      const expEl = document.getElementById('total-expense');
+      if (expEl) expEl.textContent = '¥' + data.totalExpense.toLocaleString();
+      const nutEl = document.getElementById('missing-nutrients');
+      if (nutEl) nutEl.innerHTML = data.missingNutrients.replace(/\n/g, '<br>');
+      const warnEl = document.getElementById('waste-warning');
+      if (warnEl) warnEl.innerHTML = data.wasteWarning;
+      if (showLoading) hideGlobalLoading();
+    }).withFailureHandler(err => {
+      alert('エラー: ' + err.message);
+      if (showLoading) hideGlobalLoading();
+    }).getSummaryData();
+  }
+
+  // --- 初期化 ---
+  window.addEventListener('load', () => {
+    window.history.pushState(null, null, window.location.href);
+    window.addEventListener('popstate', function(e) {
+      window.history.pushState(null, null, window.location.href);
+    });
+
+    document.querySelectorAll('#tab-analysis .card').forEach(card => {
+      const h2 = card.querySelector('h2'); if (!h2) return;
+      const headerDiv = document.createElement('div'); headerDiv.className = 'card-header';
+      const titleNode = h2.cloneNode(true);
+      const toggleBtn = document.createElement('span'); toggleBtn.className = 'toggle-btn'; toggleBtn.textContent = '▼';
+      headerDiv.appendChild(titleNode); headerDiv.appendChild(toggleBtn);
+      const bodyDiv = document.createElement('div'); bodyDiv.className = 'card-body';
+      const children = Array.from(card.childNodes); let isBody = false;
+      children.forEach(child => { if (child === h2) { isBody = true; return; } if (isBody) bodyDiv.appendChild(child); });
+      h2.remove(); card.appendChild(headerDiv); card.appendChild(bodyDiv);
+      
+      headerDiv.addEventListener('click', () => { 
+        bodyDiv.classList.toggle('collapsed'); 
+        toggleBtn.textContent = bodyDiv.classList.contains('collapsed') ? '▲' : '▼'; 
+      });
+    });
+    
+    // 画面ロード完了後に確実に初期実行
+    updateSummary(true);
+  });
+</script>

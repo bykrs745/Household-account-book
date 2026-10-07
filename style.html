@@ -1,0 +1,457 @@
+<style>
+  :root {
+    --bg-color: #121212;
+    --surface-color: #1e1e1e;
+    --primary-color: #bb86fc;
+    --secondary-color: #03dac6;
+    --text-primary: #e0e0e0;
+    --text-secondary: #a0a0a0;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background-color: var(--bg-color);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overscroll-behavior-y: none;
+  }
+
+  .app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow-y: auto;
+  }
+
+  .header {
+    background-color: rgba(30, 30, 30, 0.85);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    padding: 16px;
+    text-align: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+  }
+
+  .header h1 {
+    margin: 0;
+    font-size: 20px;
+    color: var(--primary-color);
+  }
+
+  .content {
+    flex: 1;
+    padding: 16px;
+    padding-bottom: 80px;
+  }
+
+  .card {
+    background-color: var(--surface-color);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+  }
+
+  .card h2 {
+    margin-top: 0;
+    font-size: 16px;
+    border-bottom: 1px solid #333;
+    padding-bottom: 8px;
+  }
+
+  .btn-primary, .btn-secondary {
+    display: block;
+    width: 100%;
+    padding: 12px;
+    border-radius: 8px;
+    text-align: center;
+    font-weight: bold;
+    box-sizing: border-box;
+    cursor: pointer;
+    border: none;
+  }
+
+  .btn-primary {
+    background-color: var(--primary-color);
+    color: #000;
+  }
+
+  .btn-secondary {
+    background-color: transparent;
+    color: var(--secondary-color);
+    border: 1px solid var(--secondary-color);
+    margin-top: 12px;
+  }
+
+  .file-input {
+    display: none;
+  }
+
+  .hidden {
+    display: none !important;
+  }
+
+  #image-preview {
+    width: 100%;
+    border-radius: 8px;
+    margin-top: 12px;
+    object-fit: contain;
+  }
+
+  .summary-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .summary-list li {
+    padding: 8px 0;
+    display: flex;
+    justify-content: space-between;
+    color: var(--text-secondary);
+  }
+
+  .summary-list span {
+    color: var(--text-primary);
+    font-weight: bold;
+  }
+
+  .bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    background-color: rgba(30, 30, 30, 0.85);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    display: flex;
+    justify-content: space-around;
+    padding: 12px 0;
+    border-top: 1px solid #333;
+    z-index: 1000;
+  }
+
+  .nav-item {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  .nav-item.active {
+    color: var(--primary-color);
+  }
+
+  #loading {
+    text-align: center;
+    margin-top: 12px;
+    color: var(--secondary-color);
+  }
+
+  .form-group {
+    margin-bottom: 16px;
+  }
+
+  .form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-size: 14px;
+    color: var(--text-secondary);
+  }
+
+  .text-input, .select-input {
+    width: 100%;
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid #444;
+    background-color: #2c2c2c;
+    color: var(--text-primary);
+    box-sizing: border-box;
+    font-size: 16px;
+  }
+
+  .summary-text {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+  }
+
+  .visit-date {
+    display: inline-block;
+    background-color: #333;
+    color: var(--primary-color);
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    margin: 2px;
+  }
+  
+  .freq-high { color: #cf6679; }
+  .freq-medium { color: #ffb300; }
+  .freq-low { color: #03dac6; }
+
+  .type-super { border-left: 4px solid #bb86fc; padding-left: 8px; }
+  .type-conbini { border-left: 4px solid #03dac6; padding-left: 8px; }
+  .type-eatout { border-left: 4px solid #cf6679; padding-left: 8px; }
+  .type-other { border-left: 4px solid #a0a0a0; padding-left: 8px; }
+
+  #store-visits {
+    max-height: 200px;
+    overflow-y: auto;
+  }
+  
+  #item-frequency-list {
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .report-area {
+    margin-top: 12px;
+    padding: 12px;
+    background-color: #2c2c2c;
+    border-radius: 8px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text-primary);
+    white-space: pre-wrap;
+  }
+  /* カレンダーCSS */
+  .calendar-header {
+    text-align: center;
+    font-weight: bold;
+    margin-bottom: 8px;
+    color: var(--primary-color);
+  }
+  .calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+  }
+  .cal-cell {
+    background-color: #2c2c2c;
+    border-radius: 4px;
+    min-height: 60px;
+    padding: 2px;
+    font-size: 10px;
+    cursor: pointer;
+    overflow: hidden;
+  }
+    .cal-date {
+    display: block;
+    text-align: center;
+    color: var(--text-primary);
+    margin-bottom: 2px;
+  }
+  .cal-date.saturday { background-color: rgba(100, 181, 246, 0.2); color: #64b5f6; }
+  .cal-date.sunday { background-color: rgba(229, 115, 115, 0.2); color: #e57373; }
+  .cal-date.holiday { background-color: rgba(229, 115, 115, 0.2); color: #e57373; }
+  .cal-icon {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2px;
+  }
+  /* モーダルCSS */
+  .modal {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+  }
+  .modal-content {
+    background-color: rgba(30, 30, 30, 0.85);
+    backdrop-filter: blur(8px);
+    border: 1px solid #444;
+    padding: 20px;
+    border-radius: 8px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+    position: relative;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.6);
+  }
+  .modal-close {
+    position: absolute;
+    top: 10px; right: 15px;
+    font-size: 24px;
+    cursor: pointer;
+    color: var(--text-secondary);
+  }
+  .receipt-detail-card {
+    border: 1px solid #444;
+    padding: 8px;
+    margin-bottom: 8px;
+    border-radius: 4px;
+  }
+  .item-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    border-bottom: 1px dashed #444;
+    padding: 4px 0;
+  }
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    border-bottom: 1px solid #333;
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+  }
+  .card-header h2 {
+    margin: 0;
+    font-size: 16px;
+    border: none;
+    padding: 0;
+  }
+  .card-body {
+    transition: max-height 0.4s ease-out, opacity 0.4s ease-out;
+    max-height: 2500px;
+    opacity: 1;
+    overflow: hidden;
+  }
+  .card-body.collapsed {
+    max-height: 0;
+    opacity: 0;
+    margin: 0;
+  }
+  .toggle-btn {
+    font-size: 14px;
+    color: var(--text-secondary);
+    user-select: none;
+  }
+  .chart-container {
+    position: relative;
+    height: 250px;
+    width: 100%;
+  }
+
+  /* グラフモーダル用（縦画面時に90度回転して大きく見せる） */
+  .chart-modal-content {
+    background-color: rgba(30, 30, 30, 0.95);
+    backdrop-filter: blur(8px);
+    border: 1px solid #444;
+    padding: 20px;
+    border-radius: 8px;
+    position: relative;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.6);
+    display: flex;
+    flex-direction: column;
+  }
+  @media screen and (orientation: portrait) {
+    .chart-modal-content {
+      width: 85vh;
+      height: 90vw;
+      transform: rotate(90deg);
+    }
+  }
+  @media screen and (orientation: landscape) {
+    .chart-modal-content {
+      width: 90vw;
+      height: 90vh;
+    }
+  }
+  /* 家族設定UI */
+ .family-row {
+   background-color: #2c2c2c;
+   padding: 12px;
+   border-radius: 8px;
+   margin-bottom: 12px;
+   display: flex;
+   flex-wrap: wrap;
+   gap: 8px;
+   position: relative;
+ }
+ .family-input {
+   padding: 8px;
+   background: #1e1e1e;
+   border: 1px solid #444;
+   color: #fff;
+   border-radius: 4px;
+   flex: 1;
+   min-width: 80px;
+ }
+ 
+  /* フローティングメニュー */
+  @keyframes glow-border {
+    0% { box-shadow: 0 0 5px var(--primary-color); border: 1px solid transparent; }
+    50% { box-shadow: 0 0 25px var(--primary-color); border: 1px solid var(--primary-color); }
+    100% { box-shadow: 0 0 5px var(--primary-color); border: 1px solid transparent; }
+  }
+  #floating-action-bar {
+    position: fixed;
+    bottom: 160px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    background-color: rgba(30, 30, 30, 0.95);
+    padding: 12px 16px;
+    border-radius: 30px;
+    display: flex;
+    gap: 12px;
+    width: 80%;
+    max-width: 300px;
+    backdrop-filter: blur(8px);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    opacity: 0;
+    pointer-events: none;
+    animation: glow-border 2s infinite;
+  }
+  #floating-action-bar.visible {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translate(-50%, -10px);
+  }
+  /* グラフ拡大モーダル用（縦画面のまま拡大固定） */
+  .chart-modal-content {
+    background-color: rgba(30, 30, 30, 0.95);
+    backdrop-filter: blur(8px);
+    border: 1px solid #444;
+    padding: 20px;
+    border-radius: 8px;
+    position: relative;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.6);
+    display: flex;
+    flex-direction: column;
+    width: 95vw;
+    height: 80vh;
+    transform: none !important;
+  }
+  @media screen and (orientation: portrait) {
+    .chart-modal-content { transform: none !important; width: 95vw; height: 80vh; }
+  }
+  /* カレンダーツールチップ（外枠・背景を完全透明化） */
+  #cal-tooltip {
+    position: absolute;
+    z-index: 2000;
+    background: transparent;
+    border: none;
+    padding: 0;
+    pointer-events: none;
+    min-width: 150px;
+    max-width: 90vw;
+    color: var(--text-primary);
+    box-shadow: none;
+    font-size: 12px;
+    word-break: break-word;
+  }
+  @keyframes loading-glow {
+    0% { box-shadow: 0 0 5px var(--secondary-color); border-color: transparent; }
+    50% { box-shadow: 0 0 15px var(--secondary-color); border-color: var(--secondary-color); }
+    100% { box-shadow: 0 0 5px var(--secondary-color); border-color: transparent; }
+  }
+  .loading-glow-active {
+    animation: loading-glow 1.5s infinite !important;
+    color: var(--secondary-color) !important;
+  }
+</style>
