@@ -46,8 +46,9 @@ function analyzeReceipt(base64Data, mimeType = "image/jpeg") {
     3. 外税と内税の判別: 「小計」の有無を目印にしてください。「小計」の記載がある場合は外税計算として、別途記載の「消費税」を独立した品目として抽出し、カテゴリを税金等にして末尾に [10%] または [8%] を付与してください。「小計」がなく内税表記（コンビニなど、合計に消費税が含まれる）の場合は、消費税を独立した品目として抽出しないでください。
     4. 手数料の消費税: 「ATM手数料」等の各種手数料に掛かる消費税についても、レシートの記載から算出し、独立した品目として抽出してください。
     5. 割引・ポイント: 「ポイント利用」や「割引」がある場合、priceを【マイナス数値】にして抽出し、カテゴリを適切なものにしてください。
-
-    各項目の "storeType" と "category" は、以下の【判定基準】から最も適切なものを1つ選んで出力してください。
+    6. 払込票・請求書の支払い: 払込票や請求書の控えが含まれる場合、店舗名（storeName）は決済窓口のコンビニ名ではなく、本来の請求元（例: 東京電力、〇〇市役所など）を抽出してください。カテゴリも「光熱費」や「税金」など適切なものを設定し、「その他」にはしないでください。
+    7. ATM引き出し: ATMでの現金引き出しの場合、引き出し金額のカテゴリを「資産移動」として抽出し、手数料は別品目として抽出してください（手数料のカテゴリは「手数料」等）。
+    各項目の "storeType" と "category" は、以下の【判定基準】から最も適切なものを1つ選んで出力してください。（「資産移動」の場合はマスターになくてもそのまま「資産移動」と出力してください）
     【店舗タイプの判定基準】
     ${storeStr}
 
@@ -296,8 +297,13 @@ function getAnalysisData(offsetMonth) {
     const ym = `${date.getFullYear()}/${(date.getMonth() + 1).toString().padStart(2, '0')}`;
     const storeName = r[2];
     const storeType = storeTypesList.includes(r[3]) ? r[3] : defaultStore;
-    const amount = Number(r[4]) || 0;
+    let amount = Number(r[4]) || 0;
     const rItems = itemsMap[r[0]] || [];
+    
+    let assetTransfer = 0;
+    rItems.forEach(i => { if (i.category === '資産移動') assetTransfer += i.price; });
+    amount -= assetTransfer;
+    if (amount < 0) amount = 0;
     
     if (monthlyDataStore[ym]) {
       monthlyDataStore[ym][storeType] = (monthlyDataStore[ym][storeType] || 0) + amount;
@@ -305,6 +311,7 @@ function getAnalysisData(offsetMonth) {
       if (!monthlyItemsStore[ym][storeType]) monthlyItemsStore[ym][storeType] = {};
       
       rItems.forEach(i => {
+        if (i.category === '資産移動') return;
         let cat = i.category;
         if (wasteItemSet.has(`${r[0]}_${i.name}`)) cat = '要検証';
         else if (!masters.category[cat] && cat !== '要検証') cat = 'その他';
@@ -327,6 +334,7 @@ function getAnalysisData(offsetMonth) {
       
       const displayItems = [];
       rItems.forEach(i => {
+        if (i.category === '資産移動') return;
         let cat = i.category;
         if (wasteItemSet.has(`${r[0]}_${i.name}`)) cat = '要検証';
         else if (!masters.category[cat] && cat !== '要検証') cat = 'その他';
@@ -341,7 +349,9 @@ function getAnalysisData(offsetMonth) {
         if (!storeItemsDoughnut[storeType][i.name]) storeItemsDoughnut[storeType][i.name] = { count: 0, price: i.price };
         storeItemsDoughnut[storeType][i.name].count++;
       });
-      calendarData[ymd].push({ storeName: storeName, type: storeType, amount: amount, items: displayItems });
+      if (displayItems.length > 0 || amount > 0) {
+        calendarData[ymd].push({ storeName: storeName, type: storeType, amount: amount, items: displayItems });
+      }
     }
   });
   const monthlyStats = fixedMonths.map((m, idx) => {
@@ -400,8 +410,14 @@ function getSummaryData() {
   receiptsData.forEach(r => {
     if (!r[0]) return;
     const d = new Date(r[1]);
-    const amount = Number(r[4]) || 0;
+    let amount = Number(r[4]) || 0;
     const advice = r[5] || '';
+    
+    const rItems = itemsData.filter(i => i[0] === r[0]);
+    let assetTransfer = 0;
+    rItems.forEach(i => { if (i[2] === '資産移動') assetTransfer += (Number(i[3]) || 0); });
+    amount -= assetTransfer;
+    if (amount < 0) amount = 0;
     
     receiptDates[r[0]] = d.getTime();
     sortedReceipts.push({id: r[0], time: d.getTime(), amount: amount});
@@ -673,12 +689,12 @@ function getOrCreateFolder(folderName) {
 }
 
 // --- アプリからTempフォルダへ画像を保存する ---
-function saveImageToTemp(base64Data) {
+function saveImageToTemp(base64Data, mimeType = 'image/jpeg', ext = '.jpg') {
   try {
     const folder = getOrCreateFolder("家計簿Surveillance_Temp");
-    const blob = Utilities.newBlob(Utilities.base64Decode(base64Data), 'image/jpeg', 'receipt_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss') + '.jpg');
+    const blob = Utilities.newBlob(Utilities.base64Decode(base64Data), mimeType, 'receipt_' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss') + ext);
     folder.createFile(blob);
-    return { success: true, message: "画像をTempフォルダに保存しました。後で一括登録できます。" };
+    return { success: true, message: "ファイルをTempフォルダに保存しました。後で一括登録できます。" };
   } catch (e) {
     throw new Error("保存エラー: " + e.message);
   }

@@ -31,12 +31,23 @@
         <div id="tab-input" class="tab-content active">
         
         <section class="card">
-          <h2>レシート登録</h2>
-          <div class="camera-area" style="display: flex; gap: 12px;">
+            <h2>レシート登録</h2>
+            <div class="camera-area" style="display: flex; gap: 8px;">
             <input type="file" id="receipt-camera" accept="image/*" capture="environment" class="file-input">
-            <label for="receipt-camera" class="btn-primary" style="flex: 1; margin: 0;">カメラを起動</label>
+            <label for="receipt-camera" class="btn-primary" style="flex: 1; margin: 0; padding: 12px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font-size: 13px; font-weight: bold; border-radius: 8px;">
+              <svg viewBox="0 0 24 24" style="width:24px; height:24px; fill:currentColor;"><path d="M4,4H7L9,2H15L17,4H20A2,2 0 0,1 22,6V18A2,2 0 0,1 20,20H4A2,2 0 0,1 2,18V6A2,2 0 0,1 4,4M12,7A5,5 0 0,0 7,12A5,5 0 0,0 12,17A5,5 0 0,0 17,12A5,5 0 0,0 12,7M12,9A3,3 0 0,1 15,12A3,3 0 0,1 12,15A3,3 0 0,1 9,12A3,3 0 0,1 12,9Z"/></svg>
+              カメラ
+            </label>
             <input type="file" id="receipt-gallery" accept="image/*" class="file-input">
-            <label for="receipt-gallery" class="btn-secondary" style="flex: 1; margin: 0; margin-top: 0; border: 1px solid var(--primary-color); color: var(--primary-color);">写真を選択</label>
+            <label for="receipt-gallery" class="btn-secondary" style="flex: 1; margin: 0; padding: 12px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font-size: 13px; font-weight: bold; border: 1px solid var(--primary-color); color: var(--primary-color); border-radius: 8px;">
+              <svg viewBox="0 0 24 24" style="width:24px; height:24px; fill:currentColor;"><path d="M22,16V4A2,2 0 0,0 20,2H8A2,2 0 0,0 6,4V16A2,2 0 0,0 8,18H20A2,2 0 0,0 22,16M11,12L13.03,14.71L16,11L20,16H8M2,6V20A2,2 0 0,0 4,22H18V20H4V6"/></svg>
+              写真
+            </label>
+            <input type="file" id="receipt-pdf" accept="application/pdf" class="file-input">
+            <label for="receipt-pdf" class="btn-secondary" style="flex: 1; margin: 0; padding: 12px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font-size: 13px; font-weight: bold; border: 1px solid var(--primary-color); color: var(--primary-color); border-radius: 8px;">
+              <svg viewBox="0 0 24 24" style="width:24px; height:24px; fill:currentColor;"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13M10.19,16C10.45,15.22 10.74,14.38 11.06,13.53C11.66,13.88 12.35,14.28 13.06,14.64C12.75,15.41 12.36,16.14 11.83,16.73C11.37,17.26 10.87,17.58 10.37,17.55C9.8,17.53 9.47,17.07 9.47,16.44C9.47,15.65 10.03,14.36 10.97,12.77C11.19,11.89 11.36,11.03 11.5,10.23C11.13,9.25 10.87,8.27 10.75,7.31C10.63,6.38 10.8,5.77 11.23,5.64C11.63,5.5 12.11,5.81 12.34,6.71C12.55,7.56 12.43,8.5 12,9.45C12.46,10.21 12.96,10.96 13.5,11.67C14.25,11.32 15,10.95 15.69,10.59C16.32,10.26 16.94,10 17.39,10.17C17.84,10.34 18,10.82 17.72,11.33C17.38,11.96 16.5,12.08 15.34,11.94C14.36,11.84 13.34,11.58 12.28,11.16C11.44,12.34 10.65,13.43 9.94,14.41C9.07,15.63 8.57,16.63 8.85,17.06C9.13,17.47 9.87,17.18 10.19,16M11.9,7.56C11.9,7.85 11.9,8.14 12,8.45C12.21,7.5 12.11,7 11.9,7.56M11.54,12.28C11.23,12.93 10.95,13.55 10.68,14.15C11.11,13.5 11.59,12.87 12.11,12.28M15.86,11.39C16.31,11.45 16.62,11.39 16.71,11.2C16.81,11 16.57,10.9 16.1,11.1C16.03,11.2 15.95,11.3 15.86,11.39Z"/></svg>
+              PDF
+            </label>
           </div>
           <hr style="border:0; border-top:1px solid #444; margin: 16px 0;">
           <button id="batch-process-btn" class="btn-secondary" style="background-color: #00796b; border:none;">ドライブのTempから一括登録</button>

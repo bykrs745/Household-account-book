@@ -75,13 +75,24 @@
     
     const reader = new FileReader();
     reader.onload = (event) => {
+      if (file.type === 'application/pdf') {
+        base64Image = event.target.result;
+        if (imagePreview) {
+          imagePreview.removeAttribute('src');
+          imagePreview.alt = 'PDFファイルが選択されました（プレビュー非対応）';
+        }
+        const previewModal = document.getElementById('preview-modal');
+        if (previewModal) previewModal.classList.remove('hidden');
+        e.target.value = '';
+        return;
+      }
+
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_SIZE = 1200; 
+        const MAX_SIZE = 1200;
         let width = img.width;
         let height = img.height;
-
         if (width > height) {
           if (width > MAX_SIZE) {
             height *= MAX_SIZE / width;
@@ -97,9 +108,11 @@
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
-
         base64Image = canvas.toDataURL('image/jpeg', 0.8);
-        if (imagePreview) imagePreview.src = base64Image;
+        if (imagePreview) {
+          imagePreview.src = base64Image;
+          imagePreview.alt = 'プレビュー';
+        }
         const previewModal = document.getElementById('preview-modal');
         if (previewModal) previewModal.classList.remove('hidden');
         
@@ -112,15 +125,18 @@
 
   if (cameraInput) cameraInput.addEventListener('change', processImageAndCompress);
   if (galleryInput) galleryInput.addEventListener('change', processImageAndCompress);
+  const pdfInput = document.getElementById('receipt-pdf');
+  if (pdfInput) pdfInput.addEventListener('change', processImageAndCompress);
 
   const btnAnalyzeNow = document.getElementById('btn-analyze-now');
  if (btnAnalyzeNow) {
    btnAnalyzeNow.addEventListener('click', () => {
      if (!base64Image) return;
      document.getElementById('preview-modal').classList.add('hidden');
-     showGlobalLoading('解析中...');
-     const base64Data = base64Image.split(',')[1];
-     google.script.run
+      showGlobalLoading('解析中...');
+      const mimeType = base64Image.split(';')[0].split(':')[1] || 'image/jpeg';
+      const base64Data = base64Image.split(',')[1];
+      google.script.run
       .withSuccessHandler((response) => {
         alert('結果: ' + response.message);
         analysisCache = {}; 
@@ -130,7 +146,7 @@
         hideGlobalLoading();
         alert('エラー: ' + error.message);
       })
-      .analyzeReceipt(base64Data);
+      .analyzeReceipt(base64Data, mimeType);
     });
   }
 
@@ -140,6 +156,8 @@
       if (!base64Image) return;
       document.getElementById('preview-modal').classList.add('hidden');
       showGlobalLoading('保存中...');
+      const mimeType = base64Image.split(';')[0].split(':')[1] || 'image/jpeg';
+      const ext = mimeType === 'application/pdf' ? '.pdf' : '.jpg';
       const base64Data = base64Image.split(',')[1];
       google.script.run
       .withSuccessHandler((response) => {
@@ -150,7 +168,7 @@
         hideGlobalLoading();
         alert('エラー: ' + error.message);
       })
-      .saveImageToTemp(base64Data);
+      .saveImageToTemp(base64Data, mimeType, ext);
     });
   }
 
@@ -439,6 +457,10 @@
           if (e.clientY + 15 + tooltipHeight > window.innerHeight) {
             top = e.pageY - tooltipHeight - 15;
           }
+          // 上端にはみ出る場合は上部ギリギリに配置
+          if (top < window.scrollY + 10) {
+            top = window.scrollY + 10;
+          }
           
           tooltip.style.left = left + 'px';
           tooltip.style.top = top + 'px';
@@ -606,26 +628,30 @@
         });
       }
       tooltipEl.innerHTML = html;
-
-      const position = chart.canvas.getBoundingClientRect();
-      let top = position.top + window.pageYOffset + tooltip.caretY + 15;
-      let left = position.left + window.pageXOffset + tooltip.caretX;
-
-      tooltipEl.style.opacity = 1;
-      tooltipEl.style.left = left + 'px';
-      tooltipEl.style.top = top + 'px';
-      
-      const rect = tooltipEl.getBoundingClientRect();
-      if (left + rect.width / 2 > window.innerWidth) left = window.innerWidth - rect.width / 2 - 10;
-      if (left - rect.width / 2 < 10) left = rect.width / 2 + 10;
-      tooltipEl.style.transform = `translate(-50%, 0)`;
-      
-      if (top + rect.height > window.innerHeight) {
-        tooltipEl.style.top = (position.top + window.pageYOffset + tooltip.caretY - rect.height - 15) + 'px';
-      } else {
-        tooltipEl.style.top = top + 'px';
-      }
-    };
+          const position = chart.canvas.getBoundingClientRect();
+          let top = position.top + window.pageYOffset + tooltip.caretY + 15;
+          let left = position.left + window.pageXOffset + tooltip.caretX;
+          
+          tooltipEl.style.transform = 'none'; // transformを無効化して絶対座標で制御
+          tooltipEl.style.opacity = 1;
+          tooltipEl.style.left = left + 'px';
+          tooltipEl.style.top = top + 'px';
+          
+          const rect = tooltipEl.getBoundingClientRect();
+          
+          // X軸の境界計算
+          left = left - (rect.width / 2);
+          if (left + rect.width > window.innerWidth - 10) left = window.innerWidth - rect.width - 10;
+          if (left < 10) left = 10;
+          tooltipEl.style.left = left + 'px';
+          
+          // Y軸の境界計算（下端・上端）
+          if (top + rect.height > window.scrollY + window.innerHeight - 10) {
+            top = position.top + window.pageYOffset + tooltip.caretY - rect.height - 15;
+          }
+          if (top < window.scrollY + 10) top = window.scrollY + 10;
+          tooltipEl.style.top = top + 'px';
+        };
 
     const ctxCatEl = document.getElementById('category-chart');
     if (ctxCatEl) {
@@ -636,12 +662,15 @@
         data: { labels: dLabels, datasets: [{ data: dDataValues, backgroundColor: dBgColors, borderWidth: 0 }] },
         options: {
           plugins: {
-            legend: { labels: { color: '#e0e0e0' } },
-            tooltip: {
-              enabled: false,
-              external: customExternalTooltip
-            }
-          },
+                    legend: { labels: { color: '#e0e0e0' } },
+                    tooltip: {
+                      bodySpacing: 6,
+                      callbacks: {
+                        title: () => null,
+                        label: function(context) { return ' ' + context.label + ': ¥' + context.raw.toLocaleString(); }
+                      }
+                    }
+                  },
           color: '#e0e0e0', maintainAspectRatio: false
         },
         plugins: [doughnutCenterTextPlugin]
